@@ -37,6 +37,10 @@ wheels/
 .DS_Store
 Thumbs.db
 
+# Google Drive 臨時檔案
+.tmp.driveupload/
+.tmp.drivedownload/
+
 # Excel 臨時檔案
 ~$*.xlsx
 ~$*.xls
