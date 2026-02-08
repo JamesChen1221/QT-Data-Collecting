@@ -26,6 +26,11 @@ def calculate_intraday_prices(ticker, trade_date):
         if isinstance(trade_date, str):
             trade_date = pd.to_datetime(trade_date)
         
+        # 檢查是否為未來日期
+        if trade_date.date() > datetime.now().date():
+            print(f"  ⚠ {trade_date.strftime('%Y-%m-%d')} 是未來日期，無法獲取盤中數據")
+            return None
+        
         # 檢查是否在最近 7 天內
         days_ago = (datetime.now() - trade_date).days
         if days_ago > 7:
@@ -204,6 +209,11 @@ def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30, days_1
         # 確保日期格式正確
         if isinstance(start_date, str):
             start_date = pd.to_datetime(start_date)
+        
+        # 檢查是否為未來日期（允許今天和過去的日期）
+        if start_date.date() > datetime.now().date():
+            print(f"  ⚠ {start_date.strftime('%Y-%m-%d')} 是未來日期，無法獲取歷史資料")
+            return None
         
         # 計算需要抓取的日期範圍（需要更多資料以計算 6 個月序列）
         fetch_start = start_date - timedelta(days=250)  # 約 8 個月前，確保有足夠交易日
