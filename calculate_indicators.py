@@ -191,6 +191,66 @@ def calculate_adx(high, low, close, period=14):
     
     return adx
 
+def get_close_price_sequence(ticker, start_date, days=120):
+    """
+    獲取開盤日期前一天開始，往前 N 個交易日的收盤價序列
+    
+    參數:
+        ticker: 股票代碼 (例如: "NVDA")
+        start_date: 開盤日期 (字串或 datetime)
+        days: 需要的交易日數量（預設 120）
+    
+    返回:
+        list: 收盤價序列（從最遠到最近），如果無法獲取則返回 None
+    """
+    try:
+        # 確保日期格式正確
+        if isinstance(start_date, str):
+            start_date = pd.to_datetime(start_date)
+        
+        # 檢查是否為未來日期
+        if start_date.date() > datetime.now().date():
+            print(f"  ⚠ {start_date.strftime('%Y-%m-%d')} 是未來日期，無法獲取收盤價序列")
+            return None
+        
+        # 計算需要抓取的日期範圍（需要更多資料以確保有足夠交易日）
+        fetch_start = start_date - timedelta(days=days * 2)  # 預留足夠的日曆日
+        fetch_end = start_date  # 包含開盤日期當天
+        
+        # 下載股票資料
+        df = yf.download(ticker, start=fetch_start, end=fetch_end, progress=False)
+        
+        if df.empty:
+            print(f"  ⚠ {ticker} 沒有收盤價資料")
+            return None
+        
+        # 處理多層索引的情況
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        
+        # 確保資料是一維的
+        if 'Close' in df.columns and df['Close'].ndim > 1:
+            df['Close'] = df['Close'].iloc[:, 0]
+        
+        # 找到開盤日期之前的資料（不包含開盤日期當天）
+        df_before_open = df[df.index < start_date]
+        
+        if len(df_before_open) == 0:
+            print(f"  ⚠ {ticker} 找不到開盤日期之前的收盤價資料")
+            return None
+        
+        # 取得最近 N 個交易日的收盤價（從最遠到最近）
+        close_prices = df_before_open['Close'].tail(days)
+        
+        # 四捨五入到 2 位小數並轉為列表
+        close_list = [round(x, 2) for x in close_prices.tolist()]
+        
+        return close_list
+    
+    except Exception as e:
+        print(f"  ✗ 獲取收盤價序列時發生錯誤: {str(e)}")
+        return None
+
 def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30, days_180=120):
     """
     計算指定股票在開盤日期之前的 RSI、ADX 和價格距離（過去的資料）
@@ -379,11 +439,18 @@ if __name__ == "__main__":
         '最高價前的最低價': ('盤中價格', '最高價前的最低價')
     }
     
+    # 收盤價序列欄位
+    close_price_120_col = '120天收盤價序列'
+    
     # 找到欄位索引
     col_indices = {}
     for col_name in [rsi_5_col, rsi_30_col, rsi_180_col, adx_5_col, adx_30_col, adx_180_col]:
         if col_name in df.columns:
             col_indices[col_name] = df.columns.get_loc(col_name) + 1
+    
+    # 找到收盤價序列欄位索引
+    if close_price_120_col in df.columns:
+        col_indices[close_price_120_col] = df.columns.get_loc(close_price_120_col) + 1
     
     # 找到價格距離欄位索引
     for col_name in price_dist_cols.keys():
@@ -439,8 +506,14 @@ if __name__ == "__main__":
             has_open_price = not pd.isna(row[open_price_col]) and str(row[open_price_col]).strip() not in ['', 'nan']
             need_intraday = not has_open_price
         
+        # 檢查是否需要計算 120 天收盤價序列
+        need_close_price_120 = False
+        if close_price_120_col in df.columns:
+            has_close_price_120 = not pd.isna(row[close_price_120_col]) and str(row[close_price_120_col]).strip() not in ['', '[]', 'nan']
+            need_close_price_120 = not has_close_price_120
+        
         # 如果所有資料都已經有了，跳過
-        if not need_rsi_adx and not need_price_dist and not need_intraday:
+        if not need_rsi_adx and not need_price_dist and not need_intraday and not need_close_price_120:
             print(f"跳過第 {idx + 1} 筆: {ticker} (日期: {date}) - 所有資料已完整")
             skipped_count += 1
             continue
@@ -450,6 +523,7 @@ if __name__ == "__main__":
         # 初始化結果
         result = None
         intraday_data = None
+        close_price_120 = None
         
         # 只在需要時計算 RSI/ADX 和價格距離
         if need_rsi_adx or need_price_dist:
@@ -463,6 +537,10 @@ if __name__ == "__main__":
         # 只在需要時計算盤中數據
         if need_intraday:
             intraday_data = calculate_intraday_prices(ticker, date)
+        
+        # 只在需要時計算 120 天收盤價序列
+        if need_close_price_120:
+            close_price_120 = get_close_price_sequence(ticker, date, days=120)
         
         # 儲存更新資料
         excel_row = idx + 2
@@ -496,6 +574,11 @@ if __name__ == "__main__":
                     if intraday_data[sub_key] is not None:
                         updates[excel_row][col_name] = intraday_data[sub_key]
         
+        # 只在需要時更新 120 天收盤價序列
+        if need_close_price_120 and close_price_120:
+            if close_price_120_col in col_indices:
+                updates[excel_row][close_price_120_col] = str(close_price_120)
+        
         # 顯示處理結果
         if updates[excel_row]:  # 如果有任何更新
             print(f"  ✓ 完成")
@@ -512,6 +595,12 @@ if __name__ == "__main__":
             
             if need_intraday and intraday_data:
                 print(f"    - 盤中數據: 開盤 ${intraday_data['開盤價']}, 10分鐘低 ${intraday_data['10分鐘最低價']}")
+            
+            if need_close_price_120 and close_price_120:
+                print(f"    - 120天收盤價序列: 共 {len(close_price_120)} 個交易日")
+                if len(close_price_120) >= 3:
+                    print(f"      最早3筆: {close_price_120[:3]}")
+                    print(f"      最近3筆: {close_price_120[-3:]}")
             
             processed_count += 1
         else:
