@@ -387,7 +387,7 @@ if __name__ == "__main__":
     
     # 嘗試找到日期欄位（支援多種名稱）
     date_col = None
-    possible_date_cols = ['開盤日期(台灣時間)', '開盤日期', '日期', '交易日期']
+    possible_date_cols = ['開盤日期', '開盤日期(台灣時間)', '日期', '交易日期']
     for col in possible_date_cols:
         if col in df.columns:
             date_col = col
@@ -407,13 +407,13 @@ if __name__ == "__main__":
     
     print(f"使用欄位: 股票代碼='{ticker_col}', 日期='{date_col}'\n")
     
-    # 更新對應的欄位
-    rsi_5_col = '5天 RSI 序列'
-    rsi_30_col = '1個月 RSI 序列'
-    rsi_180_col = '6個月 RSI 序列'
-    adx_5_col = '5天 ADX 序列'
-    adx_30_col = '1個月 ADX 序列'
-    adx_180_col = '6個月 ADX 序列'
+    # 更新對應的欄位（支援有無星號前綴）
+    rsi_5_col = '*5天 RSI 序列' if '*5天 RSI 序列' in df.columns else '5天 RSI 序列'
+    rsi_30_col = '*1個月 RSI 序列' if '*1個月 RSI 序列' in df.columns else '1個月 RSI 序列'
+    rsi_180_col = '*6個月 RSI 序列' if '*6個月 RSI 序列' in df.columns else '6個月 RSI 序列'
+    adx_5_col = '*5天 ADX 序列' if '*5天 ADX 序列' in df.columns else '5天 ADX 序列'
+    adx_30_col = '*1個月 ADX 序列' if '*1個月 ADX 序列' in df.columns else '1個月 ADX 序列'
+    adx_180_col = '*6個月 ADX 序列' if '*6個月 ADX 序列' in df.columns else '6個月 ADX 序列'
     
     # 價格距離欄位（可選）
     price_dist_cols = {
@@ -427,17 +427,23 @@ if __name__ == "__main__":
         '昨日收盤價': ('昨日收盤價', None)  # 支援兩種名稱
     }
     
-    # 盤中價格欄位（可選）
-    intraday_price_cols = {
-        '*開盤價格': ('盤中價格', '開盤價'),
-        '開盤價格': ('盤中價格', '開盤價'),
-        '*10分鐘最低價': ('盤中價格', '10分鐘最低價'),
-        '10分鐘最低價': ('盤中價格', '10分鐘最低價'),
-        '*1.5小時最高價': ('盤中價格', '1.5小時最高價'),
-        '1.5小時最高價': ('盤中價格', '1.5小時最高價'),
-        '*最高價前的最低價': ('盤中價格', '最高價前的最低價'),
-        '最高價前的最低價': ('盤中價格', '最高價前的最低價')
-    }
+    # 盤中價格欄位（可選，優先使用有星號的版本）
+    intraday_price_cols = {}
+    
+    # 動態檢查欄位是否存在（優先使用有星號的版本）
+    price_mappings = [
+        ('開盤價格', '開盤價'),
+        ('10分鐘最低價', '10分鐘最低價'),
+        ('1.5小時最高價', '1.5小時最高價'),
+        ('最高價前的最低價', '最高價前的最低價')
+    ]
+    
+    for col_base, result_key in price_mappings:
+        col_with_star = f'*{col_base}'
+        if col_with_star in df.columns:
+            intraday_price_cols[col_with_star] = ('盤中價格', result_key)
+        elif col_base in df.columns:
+            intraday_price_cols[col_base] = ('盤中價格', result_key)
     
     # 收盤價序列欄位
     close_price_120_col = '120天收盤價序列'
