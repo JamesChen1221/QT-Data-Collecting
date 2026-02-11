@@ -11,7 +11,7 @@ def calculate_intraday_prices(ticker, trade_date):
     指標：
     - 開盤價
     - 10分鐘最低價（開盤後 10 分鐘內的最低價）
-    - 1.5小時最高價（開盤 10 分鐘後 ~ 1.5 小時的最高價）
+    - 1.5小時最高價（從開盤開始到 1.5 小時的最高價）
     - 最高價前的最低價（開盤 10 分鐘後 ~ 1.5小時最高價時間點的最低價）
     
     參數:
@@ -75,31 +75,30 @@ def calculate_intraday_prices(ticker, trade_date):
         first_10_min = df.head(10)
         low_10min = first_10_min['Low'].min() if len(first_10_min) > 0 else None
         
-        # 3. 1.5小時最高價（開盤 10 分鐘後 ~ 1.5 小時，即第 11 根到第 90 根 K 棒）
-        # 10 分鐘 = 10 根，1.5 小時 = 90 根
-        after_10min_to_90min = df.iloc[10:90] if len(df) > 10 else pd.DataFrame()
+        # 3. 1.5小時最高價（從開盤開始到 1.5 小時，即前 90 根 K 棒）
+        # 1.5 小時 = 90 分鐘 = 90 根 1 分鐘 K 棒
+        first_90_min = df.head(90) if len(df) > 0 else pd.DataFrame()
         
-        if len(after_10min_to_90min) > 0:
-            high_90min = after_10min_to_90min['High'].max()
+        if len(first_90_min) > 0:
+            high_90min = first_90_min['High'].max()
             # 找到最高價的時間點（索引位置）
-            high_90min_idx = after_10min_to_90min['High'].idxmax()
+            high_90min_idx = first_90_min['High'].idxmax()
             
             # 4. 最高價前的最低價（開盤 10 分鐘後 ~ 最高價時間點的最低價）
             # 找到最高價在原始 df 中的位置
             high_position = df.index.get_loc(high_90min_idx)
             
-            # 如果最高價出現在第 11 根 K 棒（索引 10），表示開盤後立即達到高點
-            if high_position == 10:
-                print(f"  ⚠ 最高價出現在開盤後第 11 分鐘，設為最高價（開盤後立即達到高點）")
-                low_before_high = high_90min
-            elif high_position > 10:
+            # 如果最高價出現在前 10 分鐘內（索引 0-9）
+            if high_position < 10:
+                print(f"  ⚠ 最高價出現在開盤後前 10 分鐘（第 {high_position+1} 分鐘），最高價前的最低價設為開盤價")
+                low_before_high = open_price
+            elif high_position == 10:
+                # 最高價出現在第 11 分鐘，從第 11 分鐘開始算
+                low_before_high = df.iloc[10]['Low']
+            else:
                 # 從第 11 根（索引 10）到最高價位置（包含）
                 before_high = df.iloc[10:high_position+1]
                 low_before_high = before_high['Low'].min() if len(before_high) > 0 else high_90min
-            else:
-                # 理論上不應該發生（因為我們從第 11 根開始找）
-                print(f"  ⚠ 異常：最高價位置 {high_position} < 10")
-                low_before_high = high_90min
         else:
             high_90min = None
             low_before_high = None
@@ -407,12 +406,8 @@ if __name__ == "__main__":
     
     print(f"使用欄位: 股票代碼='{ticker_col}', 日期='{date_col}'\n")
     
-    # 更新對應的欄位（支援有無星號前綴）
-    rsi_5_col = '*5天 RSI 序列' if '*5天 RSI 序列' in df.columns else '5天 RSI 序列'
-    rsi_30_col = '*1個月 RSI 序列' if '*1個月 RSI 序列' in df.columns else '1個月 RSI 序列'
+    # 更新對應的欄位（只保留 6 個月的 RSI/ADX）
     rsi_180_col = '*6個月 RSI 序列' if '*6個月 RSI 序列' in df.columns else '6個月 RSI 序列'
-    adx_5_col = '*5天 ADX 序列' if '*5天 ADX 序列' in df.columns else '5天 ADX 序列'
-    adx_30_col = '*1個月 ADX 序列' if '*1個月 ADX 序列' in df.columns else '1個月 ADX 序列'
     adx_180_col = '*6個月 ADX 序列' if '*6個月 ADX 序列' in df.columns else '6個月 ADX 序列'
     
     # 價格距離欄位（可選）
@@ -448,9 +443,9 @@ if __name__ == "__main__":
     # 收盤價序列欄位
     close_price_120_col = '120天收盤價序列'
     
-    # 找到欄位索引
+    # 找到欄位索引（只保留 6 個月的 RSI/ADX）
     col_indices = {}
-    for col_name in [rsi_5_col, rsi_30_col, rsi_180_col, adx_5_col, adx_30_col, adx_180_col]:
+    for col_name in [rsi_180_col, adx_180_col]:
         if col_name in df.columns:
             col_indices[col_name] = df.columns.get_loc(col_name) + 1
     
@@ -460,6 +455,11 @@ if __name__ == "__main__":
     
     # 找到價格距離欄位索引
     for col_name in price_dist_cols.keys():
+        if col_name in df.columns:
+            col_indices[col_name] = df.columns.get_loc(col_name) + 1
+    
+    # 找到盤中價格欄位索引
+    for col_name in intraday_price_cols.keys():
         if col_name in df.columns:
             col_indices[col_name] = df.columns.get_loc(col_name) + 1
     
@@ -487,16 +487,12 @@ if __name__ == "__main__":
             skipped_count += 1
             continue
         
-        # 檢查 RSI/ADX 是否已經計算過
-        has_rsi_5 = not pd.isna(row[rsi_5_col]) and str(row[rsi_5_col]).strip() not in ['', '[]', 'nan']
-        has_rsi_30 = not pd.isna(row[rsi_30_col]) and str(row[rsi_30_col]).strip() not in ['', '[]', 'nan']
+        # 檢查 RSI/ADX 是否已經計算過（只檢查 6 個月的）
         has_rsi_180 = not pd.isna(row[rsi_180_col]) and str(row[rsi_180_col]).strip() not in ['', '[]', 'nan']
-        has_adx_5 = not pd.isna(row[adx_5_col]) and str(row[adx_5_col]).strip() not in ['', '[]', 'nan']
-        has_adx_30 = not pd.isna(row[adx_30_col]) and str(row[adx_30_col]).strip() not in ['', '[]', 'nan']
         has_adx_180 = not pd.isna(row[adx_180_col]) and str(row[adx_180_col]).strip() not in ['', '[]', 'nan']
         
         # 檢查是否需要計算 RSI/ADX
-        need_rsi_adx = not (has_rsi_5 and has_rsi_30 and has_rsi_180 and has_adx_5 and has_adx_30 and has_adx_180)
+        need_rsi_adx = not (has_rsi_180 and has_adx_180)
         
         # 檢查是否需要計算價格距離（檢查昨日收盤價欄位）
         need_price_dist = False
@@ -552,14 +548,10 @@ if __name__ == "__main__":
         excel_row = idx + 2
         updates[excel_row] = {}
         
-        # 只在需要時更新 RSI/ADX
-        if need_rsi_adx and result and len(result["RSI_5天"]) > 0:
+        # 只在需要時更新 RSI/ADX（只更新 6 個月的）
+        if need_rsi_adx and result and len(result["RSI_180天"]) > 0:
             updates[excel_row].update({
-                rsi_5_col: str(result["RSI_5天"]),
-                rsi_30_col: str(result["RSI_30天"]),
                 rsi_180_col: str(result["RSI_180天"]),
-                adx_5_col: str(result["ADX_5天"]),
-                adx_30_col: str(result["ADX_30天"]),
                 adx_180_col: str(result["ADX_180天"])
             })
         
@@ -590,9 +582,10 @@ if __name__ == "__main__":
             print(f"  ✓ 完成")
             
             if need_rsi_adx and result:
-                print(f"    - RSI/ADX 已更新 (實際資料: {result['實際資料天數']} 天)")
-                if len(result['RSI_5天']) >= 3:
-                    print(f"    - RSI 5天前3筆: {result['RSI_5天'][:3]}")
+                print(f"    - RSI/ADX (6個月) 已更新 (實際資料: {result['實際資料天數']} 天)")
+                if len(result['RSI_180天']) >= 3:
+                    print(f"      RSI 最早3筆: {result['RSI_180天'][:3]}")
+                    print(f"      RSI 最近3筆: {result['RSI_180天'][-3:]}")
             
             if need_price_dist and result:
                 if '價格距離_5日' in result and result['價格距離_5日']:
