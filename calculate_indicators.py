@@ -11,6 +11,7 @@ def calculate_intraday_prices(ticker, trade_date):
     指標：
     - 開盤價
     - 10分鐘最低價（開盤後 10 分鐘內的最低價）
+    - 0.5小時最高價（從開盤開始到 0.5 小時的最高價）
     - 1.5小時最高價（從開盤開始到 1.5 小時的最高價）
     - 最高價前的最低價（開盤 10 分鐘後 ~ 1.5小時最高價時間點的最低價）
     
@@ -75,7 +76,12 @@ def calculate_intraday_prices(ticker, trade_date):
         first_10_min = df.head(10)
         low_10min = first_10_min['Low'].min() if len(first_10_min) > 0 else None
         
-        # 3. 1.5小時最高價（從開盤開始到 1.5 小時，即前 90 根 K 棒）
+        # 3. 0.5小時最高價（從開盤開始到 0.5 小時，即前 30 根 K 棒）
+        # 0.5 小時 = 30 分鐘 = 30 根 1 分鐘 K 棒
+        first_30_min = df.head(30) if len(df) > 0 else pd.DataFrame()
+        high_30min = first_30_min['High'].max() if len(first_30_min) > 0 else None
+        
+        # 4. 1.5小時最高價（從開盤開始到 1.5 小時，即前 90 根 K 棒）
         # 1.5 小時 = 90 分鐘 = 90 根 1 分鐘 K 棒
         first_90_min = df.head(90) if len(df) > 0 else pd.DataFrame()
         
@@ -84,7 +90,7 @@ def calculate_intraday_prices(ticker, trade_date):
             # 找到最高價的時間點（索引位置）
             high_90min_idx = first_90_min['High'].idxmax()
             
-            # 4. 最高價前的最低價（開盤 10 分鐘後 ~ 最高價時間點的最低價）
+            # 5. 最高價前的最低價（開盤 10 分鐘後 ~ 最高價時間點的最低價）
             # 找到最高價在原始 df 中的位置
             high_position = df.index.get_loc(high_90min_idx)
             
@@ -110,6 +116,7 @@ def calculate_intraday_prices(ticker, trade_date):
         return {
             "開盤價": round(open_price, 2) if open_price else None,
             "10分鐘最低價": round(low_10min, 2) if low_10min else None,
+            "0.5小時最高價": round(high_30min, 2) if high_30min else None,
             "1.5小時最高價": round(high_90min, 2) if high_90min else None,
             "最高價前的最低價": round(low_before_high, 2) if low_before_high else None,
             "數據分鐘數": len(df)
@@ -429,6 +436,7 @@ if __name__ == "__main__":
     price_mappings = [
         ('開盤價格', '開盤價'),
         ('10分鐘最低價', '10分鐘最低價'),
+        ('0.5小時最高價', '0.5小時最高價'),
         ('1.5小時最高價', '1.5小時最高價'),
         ('最高價前的最低價', '最高價前的最低價')
     ]
@@ -501,12 +509,25 @@ if __name__ == "__main__":
             has_yesterday_close = not pd.isna(row[yesterday_close_col]) and str(row[yesterday_close_col]).strip() not in ['', 'nan']
             need_price_dist = not has_yesterday_close
         
-        # 檢查是否需要計算盤中數據（檢查開盤價欄位）
+        # 檢查是否需要計算盤中數據（檢查所有盤中價格欄位）
         need_intraday = False
-        open_price_col = '*開盤價格' if '*開盤價格' in df.columns else '開盤價格'
-        if open_price_col in df.columns:
-            has_open_price = not pd.isna(row[open_price_col]) and str(row[open_price_col]).strip() not in ['', 'nan']
-            need_intraday = not has_open_price
+        
+        # 檢查所有盤中價格欄位
+        intraday_check_cols = [
+            ('*開盤價格', '開盤價格'),
+            ('*10分鐘最低價', '10分鐘最低價'),
+            ('*0.5小時最高價', '0.5小時最高價'),
+            ('*1.5小時最高價', '1.5小時最高價'),
+            ('*最高價前的最低價', '最高價前的最低價')
+        ]
+        
+        for col_with_star, col_without_star in intraday_check_cols:
+            col_name = col_with_star if col_with_star in df.columns else col_without_star
+            if col_name in df.columns:
+                has_value = not pd.isna(row[col_name]) and str(row[col_name]).strip() not in ['', 'nan']
+                if not has_value:
+                    need_intraday = True
+                    break  # 只要有一個欄位是空的就需要計算
         
         # 檢查是否需要計算 120 天收盤價序列
         need_close_price_120 = False
