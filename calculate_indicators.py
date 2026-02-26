@@ -138,11 +138,14 @@ def calculate_price_distance(close_prices, current_price, days):
     返回:
         dict: 包含距離最高價和最低價的百分比
     """
-    if len(close_prices) < days:
+    # 如果資料不足，使用所有可用的資料
+    available_days = len(close_prices)
+    if available_days == 0:
         return None
     
-    # 取最近 N 天的收盤價
-    recent_prices = close_prices.tail(days)
+    # 取最近 N 天的收盤價（如果資料不足就取全部）
+    actual_days = min(days, available_days)
+    recent_prices = close_prices.tail(actual_days)
     
     # 找出最高價和最低價
     highest = recent_prices.max()
@@ -502,12 +505,25 @@ if __name__ == "__main__":
         # 檢查是否需要計算 RSI/ADX
         need_rsi_adx = not (has_rsi_180 and has_adx_180)
         
-        # 檢查是否需要計算價格距離（檢查昨日收盤價欄位）
+        # 檢查是否需要計算價格距離（檢查價格距離欄位）
         need_price_dist = False
-        yesterday_close_col = '*昨日收盤價' if '*昨日收盤價' in df.columns else '昨日收盤價'
-        if yesterday_close_col in df.columns:
-            has_yesterday_close = not pd.isna(row[yesterday_close_col]) and str(row[yesterday_close_col]).strip() not in ['', 'nan']
-            need_price_dist = not has_yesterday_close
+        
+        # 檢查所有價格距離欄位
+        price_dist_check_cols = [
+            '5日高價距離 (%)',
+            '5日低價距離 (%)',
+            '1個月高價距離 (%)',
+            '1個月低價距離 (%)',
+            '6個月高價距離 (%)',
+            '6個月低價距離 (%)'
+        ]
+        
+        for col_name in price_dist_check_cols:
+            if col_name in df.columns:
+                has_value = not pd.isna(row[col_name]) and str(row[col_name]).strip() not in ['', 'nan']
+                if not has_value:
+                    need_price_dist = True
+                    break  # 只要有一個欄位是空的就需要計算
         
         # 檢查是否需要計算盤中數據（檢查所有盤中價格欄位）
         need_intraday = False
