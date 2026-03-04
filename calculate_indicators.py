@@ -136,16 +136,15 @@ def calculate_price_distance(close_prices, current_price, days):
         days: 回溯天數
     
     返回:
-        dict: 包含距離最高價和最低價的百分比
+        dict: 包含距離最高價和最低價的百分比，如果資料不足則返回 None
     """
-    # 如果資料不足，使用所有可用的資料
+    # 如果資料不足指定天數，返回 None
     available_days = len(close_prices)
-    if available_days == 0:
+    if available_days < days:
         return None
     
-    # 取最近 N 天的收盤價（如果資料不足就取全部）
-    actual_days = min(days, available_days)
-    recent_prices = close_prices.tail(actual_days)
+    # 取最近 N 天的收盤價
+    recent_prices = close_prices.tail(days)
     
     # 找出最高價和最低價
     highest = recent_prices.max()
@@ -688,6 +687,9 @@ if __name__ == "__main__":
                     if sub_key:
                         if result[result_key]:
                             updates[excel_row][col_name] = (result[result_key][sub_key], False)
+                        else:
+                            # 資料不足，填入紅色 "none"
+                            updates[excel_row][col_name] = ("none", True)
                     else:
                         updates[excel_row][col_name] = (result[result_key], False)
         
@@ -758,49 +760,9 @@ if __name__ == "__main__":
         from openpyxl import load_workbook
         from openpyxl.styles import Font
         from copy import copy
-        import ast
         
         wb = load_workbook(input_file)
         ws = wb[sheet_name]
-        
-        # 先標記現有的長度不足資料為紅色
-        print("正在檢查並標記現有的長度不足資料...")
-        sequence_cols_to_check = {
-            rsi_180_col: 120,
-            adx_180_col: 120,
-            close_price_120_col: 120
-        }
-        
-        for row_idx in range(2, ws.max_row + 1):
-            for col_name, expected_length in sequence_cols_to_check.items():
-                if col_name in col_indices:
-                    col_idx = col_indices[col_name]
-                    cell = ws.cell(row=row_idx, column=col_idx)
-                    
-                    if cell.value and str(cell.value).strip() not in ['', 'nan', '[]']:
-                        try:
-                            # 嘗試解析序列
-                            if isinstance(cell.value, str):
-                                sequence = ast.literal_eval(cell.value)
-                            elif isinstance(cell.value, list):
-                                sequence = cell.value
-                            else:
-                                continue
-                            
-                            # 檢查長度，如果不足就標記為紅色
-                            if len(sequence) < expected_length:
-                                if cell.font:
-                                    cell.font = Font(
-                                        name=cell.font.name,
-                                        size=cell.font.size,
-                                        bold=cell.font.bold,
-                                        italic=cell.font.italic,
-                                        color="FF0000"  # 紅色
-                                    )
-                                else:
-                                    cell.font = Font(color="FF0000")
-                        except:
-                            pass
         
         # 更新儲存格
         for excel_row, data in updates.items():
