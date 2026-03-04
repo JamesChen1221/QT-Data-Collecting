@@ -670,11 +670,15 @@ if __name__ == "__main__":
         excel_row = idx + 2
         updates[excel_row] = {}
         
+        # 記錄哪些欄位的資料長度不足（需要標記為紅色）
+        if excel_row not in updates:
+            updates[excel_row] = {}
+        
         # 只在需要時更新 RSI/ADX（只更新 6 個月的）
         if need_rsi_adx and result and len(result["RSI_180天"]) > 0:
             updates[excel_row].update({
-                rsi_180_col: str(result["RSI_180天"]),
-                adx_180_col: str(result["ADX_180天"])
+                rsi_180_col: (str(result["RSI_180天"]), len(result["RSI_180天"]) < 120),
+                adx_180_col: (str(result["ADX_180天"]), len(result["ADX_180天"]) < 120)
             })
         
         # 只在需要時更新價格距離
@@ -683,26 +687,26 @@ if __name__ == "__main__":
                 if col_name in col_indices and result_key in result:
                     if sub_key:
                         if result[result_key]:
-                            updates[excel_row][col_name] = result[result_key][sub_key]
+                            updates[excel_row][col_name] = (result[result_key][sub_key], False)
                     else:
-                        updates[excel_row][col_name] = result[result_key]
+                        updates[excel_row][col_name] = (result[result_key], False)
         
         # 只在需要時更新盤中價格
         if need_intraday and intraday_data:
             for col_name, (result_key, sub_key) in intraday_price_cols.items():
                 if col_name in col_indices and sub_key in intraday_data:
                     if intraday_data[sub_key] is not None:
-                        updates[excel_row][col_name] = intraday_data[sub_key]
+                        updates[excel_row][col_name] = (intraday_data[sub_key], False)
         
         # 只在需要時更新 120 天收盤價序列
         if need_close_price_120 and close_price_120:
             if close_price_120_col in col_indices:
-                updates[excel_row][close_price_120_col] = str(close_price_120)
+                updates[excel_row][close_price_120_col] = (str(close_price_120), len(close_price_120) < 120)
         
         # 只在需要時更新平均交易金額
         if need_avg_trading_value and avg_trading_value:
             if avg_trading_value_col in col_indices:
-                updates[excel_row][avg_trading_value_col] = avg_trading_value
+                updates[excel_row][avg_trading_value_col] = (avg_trading_value, False)
         
         # 顯示處理結果
         if updates[excel_row]:  # 如果有任何更新
@@ -752,15 +756,63 @@ if __name__ == "__main__":
         print(f"正在更新 {input_file} 的 '{sheet_name}' 工作表（保留原有格式）...")
         
         from openpyxl import load_workbook
+        from openpyxl.styles import Font
         from copy import copy
+        import ast
         
         wb = load_workbook(input_file)
         ws = wb[sheet_name]
         
+        # 先標記現有的長度不足資料為紅色
+        print("正在檢查並標記現有的長度不足資料...")
+        sequence_cols_to_check = {
+            rsi_180_col: 120,
+            adx_180_col: 120,
+            close_price_120_col: 120
+        }
+        
+        for row_idx in range(2, ws.max_row + 1):
+            for col_name, expected_length in sequence_cols_to_check.items():
+                if col_name in col_indices:
+                    col_idx = col_indices[col_name]
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    
+                    if cell.value and str(cell.value).strip() not in ['', 'nan', '[]']:
+                        try:
+                            # 嘗試解析序列
+                            if isinstance(cell.value, str):
+                                sequence = ast.literal_eval(cell.value)
+                            elif isinstance(cell.value, list):
+                                sequence = cell.value
+                            else:
+                                continue
+                            
+                            # 檢查長度，如果不足就標記為紅色
+                            if len(sequence) < expected_length:
+                                if cell.font:
+                                    cell.font = Font(
+                                        name=cell.font.name,
+                                        size=cell.font.size,
+                                        bold=cell.font.bold,
+                                        italic=cell.font.italic,
+                                        color="FF0000"  # 紅色
+                                    )
+                                else:
+                                    cell.font = Font(color="FF0000")
+                        except:
+                            pass
+        
         # 更新儲存格
         for excel_row, data in updates.items():
-            for col_name, value in data.items():
+            for col_name, value_tuple in data.items():
                 if col_name in col_indices:
+                    # 解包 (value, is_insufficient)
+                    if isinstance(value_tuple, tuple):
+                        value, is_insufficient = value_tuple
+                    else:
+                        value = value_tuple
+                        is_insufficient = False
+                    
                     col_idx = col_indices[col_name]
                     cell = ws.cell(row=excel_row, column=col_idx)
                     
@@ -791,6 +843,19 @@ if __name__ == "__main__":
                         cell.fill = copy(reference_cell.fill)
                     if reference_cell.number_format:
                         cell.number_format = reference_cell.number_format
+                    
+                    # 如果資料長度不足，設定為紅色
+                    if is_insufficient:
+                        if cell.font:
+                            cell.font = Font(
+                                name=cell.font.name,
+                                size=cell.font.size,
+                                bold=cell.font.bold,
+                                italic=cell.font.italic,
+                                color="FF0000"  # 紅色
+                            )
+                        else:
+                            cell.font = Font(color="FF0000")
                     
                     # 最後更新值（在設定格式之後）
                     cell.value = value
