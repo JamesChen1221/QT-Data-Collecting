@@ -260,6 +260,73 @@ def get_close_price_sequence(ticker, start_date, days=120):
         print(f"  ✗ 獲取收盤價序列時發生錯誤: {str(e)}")
         return None
 
+def get_avg_trading_value(ticker, start_date, days=20):
+    """
+    獲取開盤日期前一天開始，往前 N 個交易日的平均交易金額
+    
+    交易金額 = 收盤價 × 成交量
+    
+    參數:
+        ticker: 股票代碼 (例如: "NVDA")
+        start_date: 開盤日期 (字串或 datetime)
+        days: 需要的交易日數量（預設 20）
+    
+    返回:
+        float: 平均交易金額（美元），如果無法獲取則返回 None
+    """
+    try:
+        # 確保日期格式正確
+        if isinstance(start_date, str):
+            start_date = pd.to_datetime(start_date)
+        
+        # 檢查是否為未來日期
+        if start_date.date() > datetime.now().date():
+            print(f"  ⚠ {start_date.strftime('%Y-%m-%d')} 是未來日期，無法獲取交易金額")
+            return None
+        
+        # 計算需要抓取的日期範圍
+        fetch_start = start_date - timedelta(days=days * 2)  # 預留足夠的日曆日
+        fetch_end = start_date  # 包含開盤日期當天
+        
+        # 下載股票資料
+        df = yf.download(ticker, start=fetch_start, end=fetch_end, progress=False)
+        
+        if df.empty:
+            print(f"  ⚠ {ticker} 沒有交易資料")
+            return None
+        
+        # 處理多層索引的情況
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        
+        # 確保資料是一維的
+        for col in ['Close', 'Volume']:
+            if col in df.columns and df[col].ndim > 1:
+                df[col] = df[col].iloc[:, 0]
+        
+        # 找到開盤日期之前的資料（不包含開盤日期當天）
+        df_before_open = df[df.index < start_date]
+        
+        if len(df_before_open) == 0:
+            print(f"  ⚠ {ticker} 找不到開盤日期之前的交易資料")
+            return None
+        
+        # 取得最近 N 個交易日的資料
+        recent_data = df_before_open.tail(days)
+        
+        # 計算交易金額 = 收盤價 × 成交量
+        trading_values = recent_data['Close'] * recent_data['Volume']
+        
+        # 計算平均交易金額
+        avg_trading_value = trading_values.mean()
+        
+        # 四捨五入到整數（美元）
+        return round(avg_trading_value, 0)
+    
+    except Exception as e:
+        print(f"  ✗ 獲取平均交易金額時發生錯誤: {str(e)}")
+        return None
+
 def calculate_rsi_adx_sequences(ticker, start_date, days_5=5, days_30=30, days_180=120):
     """
     計算指定股票在開盤日期之前的 RSI、ADX 和價格距離（過去的資料）
@@ -454,6 +521,9 @@ if __name__ == "__main__":
     # 收盤價序列欄位
     close_price_120_col = '120天收盤價序列'
     
+    # 平均交易金額欄位
+    avg_trading_value_col = '過去 20 天平均交易金額' if '過去 20 天平均交易金額' in df.columns else '*過去 20 天平均交易金額'
+    
     # 找到欄位索引（只保留 6 個月的 RSI/ADX）
     col_indices = {}
     for col_name in [rsi_180_col, adx_180_col]:
@@ -463,6 +533,10 @@ if __name__ == "__main__":
     # 找到收盤價序列欄位索引
     if close_price_120_col in df.columns:
         col_indices[close_price_120_col] = df.columns.get_loc(close_price_120_col) + 1
+    
+    # 找到平均交易金額欄位索引
+    if avg_trading_value_col in df.columns:
+        col_indices[avg_trading_value_col] = df.columns.get_loc(avg_trading_value_col) + 1
     
     # 找到價格距離欄位索引
     for col_name in price_dist_cols.keys():
@@ -551,8 +625,14 @@ if __name__ == "__main__":
             has_close_price_120 = not pd.isna(row[close_price_120_col]) and str(row[close_price_120_col]).strip() not in ['', '[]', 'nan']
             need_close_price_120 = not has_close_price_120
         
+        # 檢查是否需要計算平均交易金額
+        need_avg_trading_value = False
+        if avg_trading_value_col in df.columns:
+            has_avg_trading_value = not pd.isna(row[avg_trading_value_col]) and str(row[avg_trading_value_col]).strip() not in ['', 'nan']
+            need_avg_trading_value = not has_avg_trading_value
+        
         # 如果所有資料都已經有了，跳過
-        if not need_rsi_adx and not need_price_dist and not need_intraday and not need_close_price_120:
+        if not need_rsi_adx and not need_price_dist and not need_intraday and not need_close_price_120 and not need_avg_trading_value:
             print(f"跳過第 {idx + 1} 筆: {ticker} (日期: {date}) - 所有資料已完整")
             skipped_count += 1
             continue
@@ -563,6 +643,7 @@ if __name__ == "__main__":
         result = None
         intraday_data = None
         close_price_120 = None
+        avg_trading_value = None
         
         # 只在需要時計算 RSI/ADX 和價格距離
         if need_rsi_adx or need_price_dist:
@@ -580,6 +661,10 @@ if __name__ == "__main__":
         # 只在需要時計算 120 天收盤價序列
         if need_close_price_120:
             close_price_120 = get_close_price_sequence(ticker, date, days=120)
+        
+        # 只在需要時計算平均交易金額
+        if need_avg_trading_value:
+            avg_trading_value = get_avg_trading_value(ticker, date, days=20)
         
         # 儲存更新資料
         excel_row = idx + 2
@@ -614,6 +699,11 @@ if __name__ == "__main__":
             if close_price_120_col in col_indices:
                 updates[excel_row][close_price_120_col] = str(close_price_120)
         
+        # 只在需要時更新平均交易金額
+        if need_avg_trading_value and avg_trading_value:
+            if avg_trading_value_col in col_indices:
+                updates[excel_row][avg_trading_value_col] = avg_trading_value
+        
         # 顯示處理結果
         if updates[excel_row]:  # 如果有任何更新
             print(f"  ✓ 完成")
@@ -637,6 +727,9 @@ if __name__ == "__main__":
                 if len(close_price_120) >= 3:
                     print(f"      最早3筆: {close_price_120[:3]}")
                     print(f"      最近3筆: {close_price_120[-3:]}")
+            
+            if need_avg_trading_value and avg_trading_value:
+                print(f"    - 過去20天平均交易金額: ${avg_trading_value:,.0f}")
             
             processed_count += 1
         else:
